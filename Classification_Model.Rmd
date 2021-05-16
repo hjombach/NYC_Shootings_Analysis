@@ -1,0 +1,576 @@
+---
+title: "NYC shooting - Classfication Model"
+author: "Fadel Alshammasi"
+date: "4/5/2021"
+output: pdf_document
+---
+
+
+
+```{r}
+
+
+library(ggplot2)
+library(tibble)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(DBI)
+library(RSQLite)
+library(modelr)
+library(mlbench)
+library(mice)
+library(caret)
+
+
+df <- read_csv("/Users/fadelalshammasi/NYPD_Shooting_Incident_Data__Historic_.csv")
+
+
+# customized function to get the number of NAs by column (or row)
+countNA <- function(data, byrow=FALSE){
+  resVec <- c()
+  if(byrow == TRUE){
+    transpose <- t(data) 
+    counter <- 0
+   for(i in 1:length(transpose)){
+     if(is.na(transpose[i])){
+       counter <- counter+1
+     }
+     if(i%%length(data)==0){ # reset the counter after each row (i.e.,column of transpose)
+        resVec <- append(resVec, counter)
+        counter <- 0
+     }
+   }
+    setNames(resVec, c(rownames(data)))
+  }else{
+   for (i in 1:ncol(data)){
+  # num of NAs in a col= number of rows in that column - number of rows in that column WITHOUT NA
+     resVec <- append(resVec,length(data[[i]]) - nrow(na.omit(data[i]))) 
+     
+   }
+     setNames(resVec,c(colnames(data)))
+  }
+}
+
+countNA(df)
+
+```
+```{r}
+
+# converting to a numerical average 
+df <- mutate(df,
+            age_vic = case_when(
+               VIC_AGE_GROUP == "25-44" ~ 34.5,
+               VIC_AGE_GROUP =="18-24"  ~ 21,
+               VIC_AGE_GROUP == "45-64"  ~ 54.5,
+               VIC_AGE_GROUP == "65+"  ~ 75,
+               TRUE ~ 12
+             )
+             )
+
+
+df <- mutate(df,
+            age_perp = case_when(
+              PERP_AGE_GROUP == "25-44" ~ 34.5,
+               PERP_AGE_GROUP =="18-24"  ~ 21,
+               PERP_AGE_GROUP == "45-64"  ~ 54.5,
+               PERP_AGE_GROUP == "65+"  ~ 75,
+              PERP_AGE_GROUP == "<18"  ~ 12
+             )
+             )
+
+
+```
+
+```{r}
+
+# MICE imputation for the age of the perpetrator 
+dfImpute <- select(df,age_perp,age_vic,Latitude,Longitude,BORO,OCCUR_TIME) # variables used in the pmm model 
+
+md.pattern(df)
+
+library(VIM)
+aggr_plot <- aggr(df, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, labels=names(data), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+
+
+tempData <- mice(dfImpute,method="pmm", maxit=50,seed=600,remove.collinear=FALSE) ## 
+summary(tempData)
+completedData <- complete(tempData,1)
+
+```
+
+```{r}
+
+# covert back to categorical after imputation
+df2 <- cbind(completedData[1:2], df[1:19])
+df2 <- mutate(df2,
+            age_perp_range = case_when(
+              age_perp == 34.5  ~ "25-44",
+              age_perp == 21  ~ "18-24",
+               age_perp == 54.5  ~ "45-64",
+               age_perp == 75  ~ "65+",
+              age_perp == 12  ~ "<18"
+             )
+             )
+
+tiff("test1.tiff", units="in", width=8, height=5, res=300)
+select(df2, "OCCUR_TIME","12/27/14","BORO", "PERP_AGE_GROUP", "VIC_AGE_GROUP", "VIC_RACE","PERP_RACE", "STATISTICAL_MURDER_FLAG")
+dev.off()
+
+```
+
+```{r}
+
+df2$PERP_SEX[is.na(df2$PERP_SEX)] <- "M" # impute NAs in sex by the mode (M)
+df2$LOCATION_DESC[is.na(df2$LOCATION_DESC)] <- "UNKOWN" # impute NAs location type as "unknown" 
+
+df2 <- df2 %>% select(-starts_with("PERP_AGE"))
+
+df2$JURISDICTION_CODE[is.na(df2$JURISDICTION_CODE)] <- 0 #impute NAs JURISDICTION by the mode
+df2$PERP_RACE[is.na(df2$PERP_RACE)] <- "UNKOWN" # impute NAs in race as "unknown" 
+
+df2 <- rename(df2, date="12/27/14" ) #rename of the date col to make the data tidy
+
+countNA(df2)
+
+```
+All missing values are handled. Data looks tidy. 
+
+
+```{r}
+
+library(mosaicCore)
+df2$STATISTICAL_MURDER_FLAG <- logical2factor(df2$STATISTICAL_MURDER_FLAG) # make sure the target variable is a factor 
+df2 <- mutate(df2, flag=recode(STATISTICAL_MURDER_FLAG, pos="TRUE", neg="FALSE"))
+df2$flag <- factor(df2$flag, levels = c("FALSE", "TRUE"))
+
+
+```
+
+
+Parsing month, hour, and hear to have their own columns (to be used in the model later):
+```{r}
+
+#
+library(chron)
+df2 <- mutate (df2, month= NULL)
+df2 <- mutate (df2, hour= NULL)
+df2 <- mutate (df2, year= 99)
+
+df2
+
+  time <- df2$OCCUR_TIME[1]
+x <- chron(times=time)
+strsplit(as.character(x), ":")[[1]][1]
+  
+
+resVec <- c()
+resVec2 <- c()
+resVec3 <- c()
+for (i in 1:nrow(df2)){
+  rep <- df2$date[i]
+  resVec <- append(resVec,strsplit(rep,"/")[[1]][1])
+  
+  time <- df2$OCCUR_TIME[i]
+  x <- chron(times=time)
+  resVec2 <- append(resVec2,strsplit(as.character(x),":")[[1]][1])
+  
+  
+  y <- df2$date[i]
+  resVec3 <- append(resVec3,strsplit(rep,"/")[[1]][3])
+  
+}
+
+df2$month <- resVec
+df2$hour <- resVec2
+df2$year <- resVec3
+#select (df2, hour, month, year, BORO, age_perp_range, VIC_AGE_GROUP, VIC_RACE,PERP_RACE, STATISTICAL_MURDER_FLAG)
+
+```
+
+Checking if adding hour and month would violate model assumptions: 
+```{r warning = FALSE, message=FALSE}
+fit1 <- lm(as.numeric(month) ~  hour + BORO , data=df2)
+summary(fit1)
+
+
+df2 %>%
+  add_residuals(fit1, "resid") %>%
+  ggplot(aes(x=hour)) +
+  geom_boxplot(aes(y=resid), alpha=0.2) +
+  labs(title="age_perp_range vs Residuals ",
+       x="age_perp_range", y="Residuals") +
+  theme_minimal()+
+   theme(plot.title = element_text(hjust = 0.5))
+
+
+
+df2 %>%
+  add_residuals(fit1, "resid") %>%
+  ggplot(aes(sample=resid)) +
+  geom_qq() +
+  theme_minimal()
+
+
+ggplot(df2, aes(x=as.numeric(month), y=BORO, fill=BORO)) +
+  geom_boxplot()+
+  coord_flip()+
+  labs(title="month vs Diabetes ",
+       x="month", y="Diabetes") +
+    theme(plot.title = element_text(hjust = 0.5))
+  
+
+
+ggplot(df2, aes(x=as.numeric(month), y=(hour))) +
+  geom_boxplot()+
+  coord_flip()+
+  labs(title="month vs hours ",
+       x="month", y="hour") +
+    theme(plot.title = element_text(hjust = 0.5))
+  
+anova(fit1)
+
+```
+There does not seem to be any violation. 
+
+
+Partition the data: 
+```{r}
+#
+set.seed(5110)
+
+training.samples <- df2$flag %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train.data  <- df2[training.samples, ]
+test.data <- df2[-training.samples, ]
+
+```
+
+
+
+Select the features:
+```{r}
+
+set.seed(2)
+
+train.data <- select(train.data, flag, month, hour, age_perp_range, VIC_AGE_GROUP,PERP_RACE, BORO, PRECINCT, VIC_RACE, year, age_perp_range) # features selected
+
+train.data $month <- as.factor(train.data$month)
+train.data $hour <- as.factor(train.data$hour)
+train.data $age_perp_range <- as.factor(train.data$age_perp_range)
+train.data $VIC_AGE_GROUP <- as.factor(train.data$VIC_AGE_GROUP)
+train.data $PERP_RACE <- as.factor(train.data$PERP_RACE)
+train.data $BORO <- as.factor(train.data$BORO)
+train.data $PRECINCT <- as.factor(train.data$PRECINCT)
+train.data $VIC_RACE <- as.factor(train.data$VIC_RACE)
+train.data $year <- as.factor(train.data$year)
+train.data $age_perp_range <- as.factor(train.data$age_perp_range)
+train.data$flag <- as.factor(train.data$flag)
+
+train.data <- mutate(train.data, flag=relevel(flag, "TRUE"))
+test.data <- mutate(test.data, flag=relevel(flag, "TRUE"))
+
+```
+
+
+```{r}
+
+test.data$PRECINCT <- as.factor(test.data$PRECINCT)
+
+fitOriginal <- train(flag ~ as.numeric(month)+VIC_AGE_GROUP+PERP_RACE+BORO+as.numeric(hour)+year
+              +VIC_RACE+age_perp_range,
+              data=train.data,
+              method="glm", family=binomial(link="logit"),
+              trControl=trainControl(method="none"))
+
+confusionMatrix(predict(fitOriginal, test.data, na.action=na.pass),
+                test.data$flag)
+```
+Good accuracy but very low sensitivity (and a too good to be true specificity). 
+
+What is going on? 
+```{r}
+
+tiff("test.tiff", units="in", width=8, height=5, res=300)
+
+ggplot(train.data, aes(x="", y=flag, fill=flag))+
+  geom_bar(stat="identity", width=1) +
+    coord_polar("y", start=0)+
+
+   labs(title=" Over 80% of the Murder Flag Values are FALSE", y="Murder Flag (shooting is fatal)", x="Proportion")+
+  labs(fill = "Murder Flag")
+
+dev.off()
+
+```
+Seems like a class imbalance issue. 
+
+1- Refit the model after implementing class weight: 
+```{r}
+
+model_weights <- ifelse(train.data$flag == "TRUE",
+                        (1/table(train.data$flag)[1]) * 0.5,
+                        (1/table(train.data$flag)[2]) * 0.5)
+
+
+fitWeighted <- train(flag ~ as.numeric(month)+VIC_AGE_GROUP+PERP_RACE+BORO+as.numeric(hour)+(year)+VIC_RACE+age_perp_range, data=train.data,
+              method="glm", family=binomial(link="logit"),
+              trControl=trainControl(method="none"), weights = model_weights)
+
+confusionMatrix(predict(fitWeighted, test.data, na.action=na.pass),
+                test.data$flag)
+
+```
+
+
+2- Refit the model after oversampling: 
+```{r}
+fitUp <- train(flag ~  as.numeric(month)+VIC_AGE_GROUP+PERP_RACE+BORO+as.numeric(hour)+(year)+VIC_RACE+age_perp_range, data=train.data,
+              method="glm", family=binomial(link="logit"),
+              trControl=trainControl(method="none", sampling="up"))
+              
+              
+confusionMatrix(predict(fitUp, test.data, na.action=na.pass),
+                test.data$flag)
+
+```
+
+3- Refit the model after downsampling: 
+```{r}
+fitDown <- train(flag ~ as.numeric(month)+VIC_AGE_GROUP+PERP_RACE+BORO+as.numeric(hour)+(year)+VIC_RACE+age_perp_range, data=train.data,
+              method="glm", family=binomial(link="logit"),
+              trControl=trainControl(method="none", sampling="down"))
+              
+confusionMatrix(predict(fitDown, test.data, na.action=na.pass),
+                test.data$flag)
+
+```
+
+4- Refit the model after SMOTE: 
+```{r}
+# smote function implementation taken from the DMwR package: https://github.com/cran/DMwR/blob/master/R/smote.R
+SMOTE <- function(form,data,
+                  perc.over=200,k=5,
+                  perc.under=200,
+                  learner=NULL,...
+                  )
+  
+  # INPUTS:
+  # form a model formula
+  # data the original training set (with the unbalanced distribution)
+  # minCl  the minority class label
+  # per.over/100 is the number of new cases (smoted cases) generated
+  #              for each rare case. If perc.over < 100 a single case
+  #              is generated uniquely for a randomly selected perc.over
+  #              of the rare cases
+  # k is the number of neighbours to consider as the pool from where
+  #   the new examples are generated
+  # perc.under/100 is the number of "normal" cases that are randomly
+  #                selected for each smoted case
+  # learner the learning system to use.
+  # ...  any learning parameters to pass to learner
+{
+
+  # the column where the target variable is
+  tgt <- which(names(data) == as.character(form[[2]]))
+  minCl <- levels(data[,tgt])[which.min(table(data[,tgt]))]
+  
+  # get the cases of the minority class
+  minExs <- which(data[,tgt] == minCl)
+
+  # generate synthetic cases from these minExs
+  if (tgt < ncol(data)) {
+      cols <- 1:ncol(data)
+      cols[c(tgt,ncol(data))] <- cols[c(ncol(data),tgt)]
+      data <-  data[,cols]
+  }
+  newExs <- smote.exs(data[minExs,],ncol(data),perc.over,k)
+  if (tgt < ncol(data)) {
+      newExs <- newExs[,cols]
+      data <- data[,cols]
+  }
+  
+  # get the undersample of the "majority class" examples
+  selMaj <- sample((1:NROW(data))[-minExs],
+                   as.integer((perc.under/100)*nrow(newExs)),
+                   replace=T)
+
+  # the final data set (the undersample+the rare cases+the smoted exs)
+  newdataset <- rbind(data[selMaj,],data[minExs,],newExs)
+
+  # learn a model if required
+  if (is.null(learner)) return(newdataset)
+  else do.call(learner,list(form,newdataset,...))
+}
+
+
+
+# ===================================================
+# Obtain a set of smoted examples for a set of rare cases.
+# L. Torgo, Feb 2010
+# ---------------------------------------------------
+smote.exs <- function(data,tgt,N,k)
+  # INPUTS:
+  # data are the rare cases (the minority "class" cases)
+  # tgt is the name of the target variable
+  # N is the percentage of over-sampling to carry out;
+  # and k is the number of nearest neighours to use for the generation
+  # OUTPUTS:
+  # The result of the function is a (N/100)*T set of generated
+  # examples with rare values on the target
+{
+  nomatr <- c()
+  T <- matrix(nrow=dim(data)[1],ncol=dim(data)[2]-1)
+  for(col in seq.int(dim(T)[2]))
+    if (class(data[,col]) %in% c('factor','character')) {
+      T[,col] <- as.integer(data[,col])
+      nomatr <- c(nomatr,col)
+    } else T[,col] <- data[,col]
+  
+  if (N < 100) { # only a percentage of the T cases will be SMOTEd
+    nT <- NROW(T)
+    idx <- sample(1:nT,as.integer((N/100)*nT))
+    T <- T[idx,]
+    N <- 100
+  }
+
+  p <- dim(T)[2]
+  nT <- dim(T)[1]
+
+  ranges <- apply(T,2,max)-apply(T,2,min)
+  
+  nexs <-  as.integer(N/100) # this is the number of artificial exs generated
+                                        # for each member of T
+  new <- matrix(nrow=nexs*nT,ncol=p)    # the new cases
+
+  for(i in 1:nT) {
+
+    # the k NNs of case T[i,]
+    xd <- scale(T,T[i,],ranges)
+    for(a in nomatr) xd[,a] <- xd[,a]==0
+    dd <- drop(xd^2 %*% rep(1, ncol(xd)))
+    kNNs <- order(dd)[2:(k+1)]
+
+    for(n in 1:nexs) {
+      # select randomly one of the k NNs
+      neig <- sample(1:k,1)
+
+      ex <- vector(length=ncol(T))
+
+      # the attribute values of the generated case
+      difs <- T[kNNs[neig],]-T[i,]
+      new[(i-1)*nexs+n,] <- T[i,]+runif(1)*difs
+      for(a in nomatr)
+        new[(i-1)*nexs+n,a] <- c(T[kNNs[neig],a],T[i,a])[1+round(runif(1),0)]
+
+    }
+  }
+  newCases <- data.frame(new)
+  for(a in nomatr)
+    newCases[,a] <- factor(newCases[,a],levels=1:nlevels(data[,a]),labels=levels(data[,a]))
+
+  newCases[,tgt] <- factor(rep(data[1,tgt],nrow(newCases)),levels=levels(data[,tgt]))
+  colnames(newCases) <- colnames(data)
+  newCases
+}
+
+smote <- SMOTE(flag ~ . , data=train.data, perc.over = 570, perc.under=99)
+
+fitSMOTE <- train(flag ~ as.numeric(month)+VIC_AGE_GROUP+PERP_RACE+BORO+as.numeric(hour)+VIC_RACE+as.numeric(year)+age_perp_range, data=smote ,
+              method="glm", family=binomial(link="logit"),
+              trControl=trainControl(method="none"))
+              
+              
+confusionMatrix(predict(fitSMOTE, test.data, na.action=na.pass),
+                test.data$flag)
+```
+
+
+5- Refit the model after ROSE: 
+```{r}
+library(ROSE)
+
+table(train.data$flag) # before
+
+
+data.balanced.ou <- ovun.sample(flag~., data=train.data,
+                                 p=0.5, 
+                                seed=1, method="over")$data
+
+table(data.balanced.ou$flag) # after
+
+
+fitROSE <- train(flag ~ as.numeric(month)+VIC_AGE_GROUP+PERP_RACE+BORO+as.numeric(hour)+(year)+VIC_RACE+age_perp_range, data=data.balanced.ou,
+              method="glm", family=binomial(link="logit"),
+              trControl=trainControl(method="none"))
+
+confusionMatrix(predict(fitROSE, test.data, na.action=na.pass),
+                test.data$flag)
+
+```
+
+In all refitted models, although sensitivity has improved significantly,  specificity has diminished. This suggests there's more to this than class imbalance. 
+
+Evaluation of areas under the curve with the AUC-ROC curve: 
+```{r}
+
+library(purrr) 
+library(pROC) 
+
+
+test_roc <- function(model, data) {
+  
+  roc(data$flag,
+      predict(model, data , type = "prob")[, "FALSE"])
+
+}
+
+
+model_list <- list(original = fitOriginal,
+                   up = fitUp,
+                   down=fitDown,
+                   weighted = fitWeighted,
+                   SMOTE = fitSMOTE,
+                   ROSE=fitROSE)
+
+model_list_roc <- model_list %>%
+  map(test_roc, data = test.data)
+
+model_list_roc %>%
+  map(auc)
+
+```
+```{r}
+
+
+results_list_roc <- list(NA)
+num_mod <- 1
+
+for(the_roc in model_list_roc){
+  
+  results_list_roc[[num_mod]] <- 
+    data_frame(tpr = the_roc$sensitivities,
+               fpr = 1 - the_roc$specificities,
+               model = names(model_list)[num_mod])
+  
+  num_mod <- num_mod + 1
+  
+}
+
+results_df_roc <- bind_rows(results_list_roc)
+
+# Plot ROC curve for all 6 models
+
+custom_col <- c("#000000", "#009E73", "blue", "#D55E00", "#CC79A7", "yellow")
+
+ggplot(aes(x = fpr,  y = tpr, group = model), data = results_df_roc) +
+  geom_line(aes(color = model), size = 1) +
+  scale_color_manual(values = custom_col) +
+  geom_abline(intercept = 0, slope = 1, color = "gray", size = 1) +
+  theme_bw(base_size = 18) +
+  labs(y="True positive rate (sensitivity)", x="False positive rate (1-specificity)")
+
+```
+Other than SMOTE, areas under the curve are essentially the same. In all cases, classifiers are indeed not strong. 
+
+Conclusion: current features are not adequate. Need to find better features in the future. 

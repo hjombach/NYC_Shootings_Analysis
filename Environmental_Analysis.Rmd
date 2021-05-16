@@ -1,0 +1,440 @@
+---
+title: "DS5110 Term Project - New York City Shootings"
+author: "Hendrik Ombach"
+date: "3/14/2021"
+output: pdf_document
+---
+
+```{r - setup, include=FALSE, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(maps)
+library(lubridate)
+library(plyr)
+library(GGally)
+library(MASS)
+library(gtsummary)
+library(AER)
+```
+
+```{r - NYC Shootings Data - Set Up, message=FALSE}
+shooting_df <- read_csv("Working_Data_Files/NYPD_Shooting_Data.csv")
+
+names(shooting_df) <- tolower(names(shooting_df))
+
+shooting_df <- shooting_df %>% 
+  dplyr::rename(murder = statistical_murder_flag,
+         date= occur_date)
+
+shooting_df$date <- mdy(shooting_df$date)
+
+tt <- strptime(shooting_df$occur_time, "%H:%M")
+shooting_df$hour <- format(round(tt, units="hours"), format="%H:%M")
+
+shooting_df = shooting_df %>% 
+  mutate(date = ymd(date)) %>% 
+  mutate_at(vars(date), funs(year, month, day))
+
+shooting_df$month <- as.factor(shooting_df$month)
+
+# For negative binomial regression involving only the Bronx
+bronx_shootings <- shooting_df %>% 
+  dplyr::filter(boro == 'BRONX')
+
+
+# list of dates and shooting counts in the Bronx
+daily_shooting_counts <- ddply(bronx_shootings,.(date),nrow)
+
+
+# subset the data frame
+x <- shooting_df %>% 
+  subset(select = c('date', 'occur_time', 'boro', 'precinct', 'location_desc',
+                    'murder', 'perp_age_group', 'perp_sex', 'vic_age_group', 
+                    'vic_sex', 'vic_race'))
+
+```
+
+```{r - Weather Data - Set Up, message = FALSE}
+
+weather_df <- list.files(path='Working_Data_Files/Weather', full.names = TRUE) %>% 
+  lapply(read_csv) %>% 
+  bind_rows
+
+names(weather_df) <- tolower(names(weather_df))
+
+weather_df <- weather_df %>% 
+  dplyr::rename(max_temp = tmax, min_temp = tmin)
+
+# format date column
+weather_df$date <- mdy(weather_df$date)
+
+# vector to be used for x-axis labels
+months <- c("Jan", 'Feb', "Mar", 'Apr', 'May', 'June', 'July',
+            'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+```
+
+```{r - Pollution Data - Set Up, message = FALSE}
+
+# Columns in each pollutant frame to keep
+keeps <- c("Date.Local", "Arithmetic.Mean")
+
+
+### Carbon Monoxide
+
+co_files <- list.files(path='Working_Data_Files/Full_Pollution/CO', 
+                       pattern = '*csv', full.names = TRUE)
+
+ldf <- lapply(co_files, read.csv) 
+ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
+
+co_df <- do.call('rbind', ldf)
+co_df <- co_df[keeps]
+
+
+co_df <- dplyr::rename(co_df, co_ppm = Arithmetic.Mean)
+
+### Nitrogen Dioxide
+
+no2_files <- list.files(path='Working_Data_Files/Full_Pollution/NO2', 
+                        pattern = '*csv', full.names = TRUE)
+
+ldf <- lapply(no2_files, read.csv) 
+ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
+
+no2_df <- do.call('rbind', ldf)
+no2_df <- no2_df[keeps]
+
+no2_df <- dplyr::rename(no2_df, no2_ppm = Arithmetic.Mean)
+
+### Ozone
+
+ozone_files <- list.files(path='Working_Data_Files/Full_Pollution/ozone', 
+                          pattern = '*csv', full.names = TRUE)
+
+ldf <- lapply(ozone_files, read.csv) 
+ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
+
+ozone_df <- do.call('rbind', ldf)
+ozone_df <- ozone_df[keeps]
+
+ozone_df <- dplyr::rename(ozone_df, ozone_ppm = Arithmetic.Mean)
+
+### Sulfur Dioxide
+
+so2_files <- list.files(path='Working_Data_Files/Full_Pollution/SO2', 
+                        pattern = '*csv', full.names = TRUE)
+
+ldf <- lapply(so2_files, read.csv) 
+ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
+
+so2_df <- do.call('rbind', ldf)
+so2_df <- so2_df[keeps]
+
+so2_df <- dplyr::rename(so2_df, so2_ppb = Arithmetic.Mean)
+
+# Combine all dataframes into single dataframe
+pollution_df <- co_df %>% 
+  dplyr::left_join(no2_df, by = 'Date.Local') %>% 
+  dplyr::left_join(ozone_df, by = 'Date.Local') %>% 
+  dplyr::left_join(so2_df, by = 'Date.Local') 
+
+# Remove so2 concentration values that are negative
+pollution_df <- pollution_df %>% 
+  dplyr::filter(so2_ppb >= 0.0)
+
+# Average values with multiple measurements in a single day
+pollution_df <- pollution_df %>% 
+  group_by(Date.Local) %>% 
+  mutate_each(funs(mean)) %>% 
+  distinct
+
+# Rename and format columns
+pollution_df <- dplyr::rename(pollution_df, date = Date.Local)
+pollution_df <- pollution_df %>% 
+  mutate(date = ymd(date))
+
+# Log transform sulfur dioxide
+pollution_df<- pollution_df %>% 
+  mutate(so2_ppb_log = log1p(so2_ppb))
+```
+
+```{r - Combine All Data}
+
+# join weather and pollution data
+all_environmental <- full_join(weather_df, pollution_df, by = 'date')
+
+# format date column
+all_environmental = all_environmental %>% 
+  mutate(date = ymd(date)) %>% 
+  mutate_at(vars(date), funs(year, month, day))
+
+all_environmental$month <- as.factor(all_environmental$month)
+
+# create dataframe with one row per day with shooting # column 
+daily_shootings_df <- full_join(all_environmental, daily_shooting_counts, 
+                                by = 'date')
+
+daily_shootings_df <- tidyr::replace_na(daily_shootings_df, list(V1=0))
+
+# format and subset dataframe
+daily_shootings_df <- daily_shootings_df %>%  
+  dplyr::rename(shootings = V1) %>% 
+  subset(select = -c(year, month, day, station, name, snwd, min_temp, snow)) %>% 
+  na.omit(daily_shootings_df)
+```
+
+```{r - Environmental Visualization Investigation}
+
+daily_shootings_df %>% 
+  ggplot(aes(x = shootings)) +
+  geom_histogram(binwidth=1, fill = 'Dark Red') +
+  labs(title = "Distribution of the Number of Shootings in a Single Day - Bronx", 
+       x = "Shootings in a Day", y = 'Count') +
+  theme(axis.text=element_text(size=12))
+
+shooting_df %>% 
+  dplyr::filter(boro=='BRONX') %>% 
+  ggplot(aes(x = month)) +
+  geom_bar(fill = 'dark red') +
+  labs(title = "Distribution of Shootings per Month in the Bronx",
+       y = 'Count', x = '') +
+  scale_x_discrete(labels=months)  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=month, y=co_ppm)) +
+  geom_bar(stat = "summary", fun = "mean", fill = 'Dark blue') + 
+  scale_x_discrete(labels=months) +
+  labs(title = 'Average Carbon Monoxide Levels per Month', 
+       y = "Parts per Million", x = '')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=month, y=no2_ppm)) +
+  geom_bar(stat = "summary", fun = "mean", fill = 'Dark green') + 
+  scale_x_discrete(labels=months) +
+  labs(title = 'Average Nitrogen Dioxide Levels per Month',
+       y = "Parts per Million", x = '')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=month, y=ozone_ppm)) +
+  geom_bar(stat = "summary", fun = "mean", fill = 'coral3') + 
+  scale_x_discrete(labels=months) +
+  labs(title = 'Average Ozone Levels per Month',
+       y = 'Parts per Million', x = '')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=month, y=so2_ppb)) +
+  geom_bar(stat = "summary", fun = "mean", fill = 'cadetblue') + 
+  scale_x_discrete(labels=months) +
+  labs(title = 'Average Sulfur Dioxide Levels per Month',
+       y = "Parts per Billion", x = '')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=month, y=max_temp)) +
+  geom_bar(stat = "summary", fun = "mean", fill = 'burlywood4') + 
+  scale_x_discrete(labels=months) +
+  labs(title = 'Average Max Daily Temperatures per Month',
+       y = 'Temperature (ºF)', x = '')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=co_ppm)) +
+  geom_histogram(bins = 100, fill = 'dark blue') +
+  labs(title = 'Distribution of Carbon Monoxide Levels')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=no2_ppm)) +
+  geom_histogram(bins = 100, fill = 'dark green')+
+  labs(title = 'Distribution of Nitrogen Dioxide Levels')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=ozone_ppm)) +
+  geom_histogram(bins = 100, fill = 'coral3')+
+  labs(title = 'Distribution of Ozone Levels')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=so2_ppb)) +
+  geom_histogram(bins = 100, fill = 'cadetblue')+
+  labs(title = 'Distribution of Sulfur Dioxide Levels')  +
+  theme(axis.text=element_text(size=12))
+  
+  all_environmental %>% 
+  ggplot(aes(x=so2_ppb_log)) +
+  geom_histogram(bins = 100, fill = 'cadetblue')+
+  labs(title = 'Distribution of Log Transformed Sulfur Dioxide Levels')  +
+  theme(axis.text=element_text(size=12))
+  
+
+all_environmental %>% 
+  ggplot(aes(x=max_temp)) +
+  geom_histogram(bins = 50, fill = 'burlywood4')+
+  labs(title = 'Distribution of Temperature Readings')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=prcp)) +
+  geom_histogram(fill = 'gray23', bins=50)+
+  labs(title = 'Distribution of Precipitation per Day (Inches)')  +
+  theme(axis.text=element_text(size=12))
+
+
+cor_matrix_df <- subset(daily_shootings_df, select = c(max_temp,
+                                               co_ppm, no2_ppm, ozone_ppm, 
+                                               so2_ppb_log, prcp)) 
+
+
+ggpairs(cor_matrix_df, ggplot2::aes(alpha=.01, fill='red'))
+
+
+```
+
+```{r - Environmental Regression Analysis}
+
+# Poisson Model
+
+p1 <- glm(shootings ~ co_ppm + no2_ppm + ozone_ppm + so2_ppb_log + max_temp + 
+            prcp,  family="poisson", data=daily_shootings_df)
+
+summary(p1)
+
+tbl_regression(p1, exponentiate = FALSE)
+tbl_regression(p1, exponentiate = TRUE)
+
+dispersiontest(p1,trafo=1) # Significant over-dispersion observed
+
+# Negative Binomial Model
+
+nb1 <- glm.nb(shootings ~ co_ppm + no2_ppm + ozone_ppm + so2_ppb_log + max_temp + 
+            prcp, data =daily_shootings_df)
+
+daily_shootings_df %>% 
+  select(co_ppm, no2_ppm, ozone_ppm, so2_ppb_log, max_temp, prcp) %>% 
+  tbl_summary()
+
+summary(nb1)
+
+tbl_regression(nb1, exponentiate = FALSE)
+tbl_regression(nb1, exponentiate = TRUE)
+
+```
+
+```{r - Shootings - Location Investigation}
+
+shooting_df %>% 
+  ggplot(aes(x = boro)) +
+  geom_bar(fill = 'dark green') +
+  labs(title = "Significant Disparities Between Shootings in New York City boroughs",
+       x = '') 
+
+shooting_df %>% 
+  filter(murder == TRUE) %>% 
+  group_by(boro) %>% 
+  ggplot(aes(x = boro)) +
+  geom_bar() +
+  labs(title = "Murders per borough") 
+
+shooting_df %>% 
+  filter(murder == FALSE) %>% 
+  group_by(boro) %>% 
+  ggplot(aes(x = boro)) +
+  geom_bar() +
+  labs(title = "Non-fatal shootings per borough") 
+
+
+shooting_df %>% 
+  filter(!is.na(location_desc)) %>% 
+  group_by(murder) %>% 
+  dplyr::count(location_desc, murder, sort = TRUE) 
+
+
+shooting_df %>% 
+  filter(murder == TRUE) %>% 
+  group_by(murder) %>% 
+  dplyr::count(boro, murder, sort = TRUE)
+
+head(shooting_df)
+shooting_df %>% 
+  filter(boro == 'MANHATTAN') %>% 
+  dplyr::count() 
+```
+
+```{r - Shootings - Time Investigation}
+shooting_df %>% 
+  ggplot(aes(x = hour)) +
+  geom_bar(fill = 'dark blue') +
+  labs(title = "New York City Shootings Occur at Higher Frequency at Night and Early Morning",
+       y = 'Count', x = 'Hour of Day') +
+  theme(axis.text.x = element_text(angle = 45))
+
+shooting_df %>% 
+  filter(murder == TRUE) %>% 
+  ggplot(aes(x = hour)) +
+  geom_bar(fill = 'dark blue') +
+  labs(title = "New York City Murders Occur at Higher Frequency at Night and Early Morning",
+       y = 'Count', x = 'Hour of Day') +
+  theme(axis.text.x = element_text(angle = 45))
+
+
+shooting_df %>% 
+  ggplot(aes(x = month)) +
+  geom_bar(fill = 'dark blue') +
+  labs(title = "More New York City Shootings Occur in Late Summer - Autumn",
+       y = 'Count', x = 'Month') +
+  scale_x_discrete(labels=months) +
+  theme(axis.text.x = element_text(angle = 45)) 
+
+```
+
+```{r - Shootings - Race Investigation}
+
+shooting_df %>% 
+  filter(murder == TRUE & !is.na(perp_race)) %>% 
+  arrange(perp_race) %>% 
+  dplyr::count(perp_race, sort = TRUE) 
+
+
+shooting_df %>% 
+  filter(murder == TRUE & !is.na(perp_race)) %>% 
+  arrange(perp_race) %>% 
+  dplyr::count(perp_race, vic_race, sort = TRUE) 
+
+
+shooting_df %>% 
+  filter(vic_race != 'AMERICAN INDIAN/ALASKAN NATIVE' & 
+           perp_race != 'AMERICAN INDIAN/ALASKAN NATIVE' &
+           vic_race != 'ASIAN / PACIFIC ISLANDER' & 
+           perp_race != 'ASIAN / PACIFIC ISLANDER' & vic_race != 'UNKNOWN' & 
+           perp_race != 'UNKNOWN') %>% 
+  group_by(perp_race) %>% 
+  ggplot(aes(x = perp_race)) +
+  facet_wrap(.~ vic_race) +
+  geom_bar(aes(fill = perp_race)) +
+  labs(title ="Shootings Between Race - Faceted by Victim's Race", 
+       x = 'Perpetrator Race') +
+  coord_flip() +
+  theme(legend.position = "none")
+
+
+shooting_df %>% 
+  filter(murder == TRUE & vic_race != 'ASIAN / PACIFIC ISLANDER' & 
+           perp_race != 'ASIAN / PACIFIC ISLANDER' & vic_race != 'UNKNOWN' & 
+           perp_race != 'UNKNOWN') %>% 
+  group_by(perp_race) %>% 
+  ggplot(aes(x = perp_race)) +
+  facet_wrap(.~ vic_race) +
+  geom_bar(aes(fill = perp_race)) +
+  labs(title ="Murders Between Race - Faceted by Victim's Race", 
+       x = 'Perpetrator Race') +
+  coord_flip() +
+  theme(legend.position = "none")
+```

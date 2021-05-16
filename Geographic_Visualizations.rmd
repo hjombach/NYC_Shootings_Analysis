@@ -1,0 +1,387 @@
+Datafiles' sources:  
+
+shootings data file: 
+https://data.cityofnewyork.us/Public-Safety/NYPD-Shooting-Incident-Data-Historic-/833y-fsy8
+
+NYC precincts shapefile: 
+https://hub.arcgis.com/datasets/DCP::nyc-police-precincts?geometry=-75.284%2C40.524%2C-72.671%2C40.888
+
+NYC Boroughs shapefile:
+https://hub.arcgis.com/datasets/498c7ff03780407494301c23cb59b899_0?geometry=-75.284%2C40.524%2C-72.671%2C40.888
+
+
+
+
+Importing all the necessary libraries and the data file
+
+```{r, message = FALSE}     
+#Importing all the necessary libraries for the analysis
+#install.packages("leaflet")
+#install.packages('rgdal')
+#install.packages('htmltools') 
+library(htmltools)#for adding labels in the maps
+library(leaflet) #package used for building maps
+library(rgdal) # to read the shape files for boroughs and precincts 
+library(tidyverse) #for data manipulation and wrangling
+library(ggplot2) #for basic data visualization
+library(lubridate) #working with and manipulating dates
+
+datafile <- read_csv("Data/NYPD_Shooting_Incident_Data__Historic_.csv")
+View(datafile)
+
+```
+
+
+Elementary Visualizations from the data file 
+
+```{r, message = FALSE}
+
+
+data_expanded<- datafile %>% mutate(year_month = format(as.Date(datafile$OCCUR_DATE, 
+                                                           '%m/%d/%Y'),'%Y.%m'),
+                                    month = format(as.Date(datafile$OCCUR_DATE, 
+                                                           '%m/%d/%Y'), '%m'),
+                                    year = format(as.Date(datafile$OCCUR_DATE, 
+                                       '%m/%d/%Y'), '%Y'), .after = OCCUR_DATE) %>%
+                                      rename('Borough' = BORO)
+View(data_expanded)
+
+
+#Visualizing the total number of shootings and murders over the years
+shootings_per_year <- data_expanded %>% group_by(year) %>% summarise(n())%>%
+                                                rename('num_sh' = `n()`)
+
+murders_per_year <- data_expanded %>% filter(STATISTICAL_MURDER_FLAG == TRUE) %>%
+  group_by(year) %>% summarise(n()) %>% rename('num_mur' = `n()`)
+
+
+ggplot(mapping = aes(x= as.double(year)))+
+         geom_line(data = shootings_per_year, mapping = aes(y= num_sh), color = 'blue')+ 
+         geom_line(data = murders_per_year, mapping = aes(y= num_mur), color = 'red')+ 
+  labs(title = "Shooting incidents and consequent murders have decreased over the years", 
+       x= 'Year(2006 - 2019)', y = "Number of shootings/murders in New York")
+
+
+
+#Visualizing the shooting rate  and murder rate per day over the years
+shooting_rate <- shootings_per_year%>% mutate(sh_rate = num_sh/365)
+murder_rate <- murders_per_year%>% mutate(mur_rate = num_mur/365)
+
+ggplot(mapping = aes(x= as.double(year)))+
+  geom_line(data = shooting_rate, mapping = aes(y = sh_rate), color = 'blue') +
+  geom_line(data = murder_rate, mapping = aes(y = mur_rate), color = 'red') +
+  labs(title = "Average Shooting rate per day is still over 2.5 while the average murder rate is over 0.5 per day at the end of 2019",
+       x= 'Year', y = "Average Shooting/murder rate per day")
+
+```
+
+*Observations*  
+1. The number of shootings and associated murders have decreased over the years 
+in the time period under consideration.  
+2. The overall shooting rate and the corresponding murder rate has also declined
+but it still substantial.  
+
+
+Visualizations to find any obvious pattern in the data in terms of the Boroughs, 
+Perpetrators and Victims:
+
+```{r, message = FALSE}
+
+#visualizing the total number of shooting incidents per BORO(by different fills)
+ggplot(data = data_expanded, mapping = aes(x= Borough, fill = year))+
+  geom_bar()+
+  labs(title = "Number of shootings per Borough (2006 - 2019)",
+       x= "Borough", y = 'Number of shootings')
+
+ggplot(data = data_expanded, mapping = aes(x= Borough, fill = STATISTICAL_MURDER_FLAG))+
+  geom_bar()+
+  labs(title = "Number of shootings per Borough (2006 - 2019)",
+       x= "Borough", y = 'Number of shootings')+
+  geom_text(aes(label=..count..),stat='count',vjust= 0.2)
+
+ggplot(data = data_expanded, mapping = aes(x= Borough, fill = as.character(PRECINCT)))+
+  geom_bar()+
+  labs(title = "Number of shootings per Borough (2006 - 2019)",
+       x= "Borough", y = 'Number of shootings')+
+  theme(legend.position = 'none')
+
+
+#visualizing the Perpetrators' race involved in all shootings 
+ggplot(data = data_expanded, mapping = aes(x= PERP_RACE, fill = PERP_RACE))+
+  geom_bar()+
+  labs(title = "Perpetrator's race involved in the shootings",
+       x= "Perpetrator's Race", y = "Number of shootings")+
+  theme(axis.text.x = element_text(angle = 90))+
+  geom_text(aes(label=..count..),stat='count',vjust=-0.1)
+
+
+#visualizing the Victims' race involved in all shootings
+ggplot(data = data_expanded, mapping = aes(x= VIC_RACE, fill = VIC_RACE))+
+  geom_bar()+
+  labs(title = "Victims's race involved in the shootings",
+       x= "Victim's Race", y = "Number of shootings")+
+  theme(axis.text.x = element_text(angle = 90))+
+  geom_text(aes(label=..count..),stat='count',vjust=-0.1)
+
+
+
+#visualizing the Perpetrators' races involved in all shootings across the different Boroughs
+ggplot(data = data_expanded, mapping = aes(x= PERP_RACE, fill = PERP_RACE))+
+  geom_bar()+
+  facet_wrap(~Borough)+
+  labs(title = "Perpetrator's race involved in the shootings across every Borough",
+       x= "Perpetrator's Race", y = "Number of shootings")+
+  theme(axis.text.x = element_text(angle = 90))+
+  geom_text(aes(label=..count..),stat='count',vjust=-0.2)
+
+
+
+#visualizing the Victims' race involved in all shootings across the different Boroughs
+ggplot(data = data_expanded, mapping = aes(x= VIC_RACE, fill = VIC_RACE))+
+  geom_bar()+
+  facet_wrap(~Borough)+
+  labs(title = "Victims's race involved in the shootings for every Borough",
+       x= "Victim's Race", y = "Number of shootings")+
+  theme(axis.text.x = element_text(angle = 90))+
+  geom_text(aes(label=..count..),stat='count',vjust=-0.2)
+
+
+#visualizing the Perpetrators' race filled by victims' race
+ggplot(data = data_expanded, mapping = aes(x= PERP_RACE, fill = VIC_RACE))+
+  geom_bar()+
+  labs(title = "Plot of the Perpetrator's race filled by Victim's race",
+       x= "Perpetrator's Race", y = "Number of shootings")+
+  theme(axis.text.x = element_text(angle = 90))
+  
+```
+
+*Observations*   
+1. Brooklyn and Bronx have seen the maximum number of shootings as well as the
+associated number of murders over the years.
+2. Blacks and Hispanics have been predominantly involved in the shootings, 
+both in terms of the Perpetrators and Victims. This pattern is almost consistent 
+through all individual Boroughs.  
+3. No clear pattern emerges from the plot of shootings involving Perpetrators against 
+their victims.  
+
+
+
+Visualizations to find any other pattern in shootings:
+
+```{r, message = FALSE}
+
+shootings_per_day <- datafile%>% group_by(OCCUR_DATE)%>%summarise(n())
+
+#Graph of incidents per day over time
+ggplot(data = shootings_per_day, mapping = aes(x= `n()`))+
+  geom_histogram(fill = 'blue')+
+  labs(title = "The number of incidents seem to follow an exponential decay distribution",
+       x= "Number of shootings per day", y = 'Count')
+
+#The graph of incidents per day looks to be exponential
+
+#Trend with hour of the day
+time_data <- datafile %>% separate(OCCUR_TIME, into = (c('hr', 'mt', 'sec')), 
+                                   sep = ':') %>% group_by(hr) %>% summarise(n())
+
+ggplot(data = time_data, mapping = aes(x= hr, y = `n()`))+
+  geom_bar(fill = 'blue', stat = 'identity')+
+  labs(title = "Shootings tend to be higher in the night hours",
+       x = "Hours of the day", y= 'Number of shootings')
+
+
+#Trend per month of a year
+shootings_per_month <- data_expanded %>% group_by(month)%>%summarise(n())
+
+
+ggplot(data = shootings_per_month, mapping = aes(x= month, y = `n()`))+
+  geom_bar(stat = 'identity', fill = 'blue')+
+  labs(title = "The number of shootings are relatively higher during the summer months",
+       x = 'Month of a year', y = 'Number of shootings')
+
+#Exploring and visualizing the shooting trend over month/every year
+shootings_per_monthyear <- data_expanded %>% group_by(year_month,year) %>% summarise(n()) %>% arrange(year)
+
+ggplot(data = shootings_per_monthyear, mapping = aes(x= year_month, 
+                                                     y = `n()`, group = year))+
+  geom_point()+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90))+
+  geom_smooth()+
+  labs(title = "The number of shootings reaches it's peak in July/August every year",
+       x= 'Time(in year/month(2006-2019))', y= 'Number of shootings')
+
+
+
+datafile %>% group_by(LOCATION_DESC) %>% summarise(n()) %>% arrange(desc(`n()`))
+
+#Useless visualization
+#count_per_day <- data_elaborated %>% arrange(OCCUR_DATE)%>% group_by(OCCUR_DATE) %>% count()
+#ggplot(data = count_per_day, mapping = aes(x= OCCUR_DATE, y = n))+
+  #geom_point()+
+  #theme_minimal()+
+  #theme(axis.text.x = element_text(angle = 90))+
+  #geom_smooth()
+
+```
+
+*Observations*  
+1. The number of shootings seem to follow an exponential decay distribution. More 
+on this later in the project. 
+2. The number of shootings are relatively higher in the summer months.  
+3. The plot of number of shootings per month for each year shows an interesting 
+pattern. The distribution over each year seems similar i.e. higher shootings during 
+the summer months, further solidifying the case that 
+temperature has an affect in the number of shooting incidents.
+
+
+
+Interpreting missing data for perpetrators as Unidentified cases:
+
+```{r, message = FALSE}
+#Adding a column in the original dataset to identify the cases as solved or unsolved
+
+data_status <- datafile %>% mutate(Perpetrator_status = ifelse(
+  is.na(PERP_AGE_GROUP) & is.na(PERP_RACE) &is.na(PERP_SEX),
+  'Unidentified', 'Identified'))
+
+data_status  %>% group_by(Perpetrator_status)%>% summarise(n())
+
+perp_identified <- data_status %>% filter(Perpetrator_status == 'Identified')
+perp_unidentified <- data_status %>% filter(Perpetrator_status == 'Unidentified')
+
+ggplot(data = data_status, mapping = aes(x= BORO, fill = Perpetrator_status))+
+  geom_bar() +
+  geom_text(aes(label=..count..),stat='count',vjust= 0.2)
+  
+
+```
+
+*Observations*   
+1. All the missing observations of the Perpetrator seems to suggest that the Perp 
+was not identified. This clearly shows that the case wasn't solved. But at the same 
+time, having Perpetrator data only means that the Perp was identified but not 
+necessarily captured. 
+2. In almost 33% of all the shooting incidents, the perpetrator seem to have got away.  
+
+
+Working with and exploring maps(static and dynamic) with the leaflet package
+
+```{r, message = FALSE}
+
+#Reading the shape file for the boroughs of New York
+ny_counties <- readOGR("Data/NYC_Boroughs-shp/ac61f521-b4ff-4230-87da-ef102865acf2202045-1-1jqmgoq.h2egi.shp")
+
+
+ny_map <- leaflet() %>%
+  addProviderTiles(providers$Stamen.Toner) %>%
+  setView(lng = -73.9352, lat = 40.7306,zoom = 11.5) %>%
+  addPolygons(data = ny_counties) %>%
+addCircleMarkers(lng = data_status$Longitude, lat = data_status$Latitude, 
+                 radius = 0.1, color = 'red')
+  
+
+
+leaflet_map <- leaflet() %>% addTiles() %>% 
+  setView(lng = -73.9352, lat = 40.7306,zoom = 12) %>%
+  addPolygons(data = ny_counties , color = "green", weight = 9, fillColor = 'creme')%>%
+addCircleMarkers(lng = perp_identified$Longitude, lat = perp_identified$Latitude, 
+                 color = 'green', radius = 0.01, group = 'Perps Identified')%>%
+  addCircleMarkers(lng = perp_unidentified$Longitude, lat = perp_unidentified$Latitude, 
+                 color = 'red', radius = 0.01, group = 'Perps Unidentified') %>%
+  addLayersControl(overlayGroups = c('Perps Identified','Perps Unidentified'),
+                   options = layersControlOptions(collapsed = FALSE))
+
+leaflet_map_clustered <- leaflet() %>% 
+  addProviderTiles(providers$Stamen.Toner) %>% 
+  setView(lng = -73.9352, lat = 40.7306,zoom = 12) %>%
+  addPolygons(data = ny_counties , color = "green", weight = 10, fillColor = 'creme')%>%
+addCircleMarkers(lng = perp_identified$Longitude, lat = perp_identified$Latitude, 
+                 radius = 0.1, color = 'green',group = 'Perps Identified', 
+                 clusterOptions = markerClusterOptions())%>%
+addCircleMarkers(lng = perp_unidentified$Longitude, lat = perp_unidentified$Latitude, 
+                 radius = 0.1, color = 'red', group = 'Perps Unidentified',
+                 clusterOptions = markerClusterOptions()) %>%
+  addLayersControl(overlayGroups = c('Perps Identified','Perps Unidentified'),
+                   options = layersControlOptions(collapsed = FALSE))
+
+leaflet_map
+
+leaflet_map_clustered
+
+
+#map showing the number of shootings by boroughs
+
+queens_data <- datafile %>% filter(BORO == "QUEENS")
+bronx_data <- datafile %>% filter(BORO == "BRONX")
+man_data <- datafile %>% filter(BORO == "MANHATTAN")
+st_data <- datafile %>% filter(BORO == "STATEN ISLAND")
+brook_data <- datafile %>% filter(BORO == "BROOKLYN")
+
+
+map_boro <- leaflet() %>% addTiles() %>% 
+  setView(lng = -73.9352, lat = 40.7306,zoom = 12) %>%
+  addPolygons(data = ny_counties , color = "black", weight = 5, fillColor = 'creme')%>%
+  
+  addCircleMarkers(lng = bronx_data$Longitude, lat = bronx_data$Latitude, 
+                 color = 'blue', radius = 0.1, group = 'Bronx')%>%
+  addCircleMarkers(lng = brook_data$Longitude, lat = brook_data$Latitude, 
+                 color = 'green', radius = 0.1, group = 'Brooklyn') %>%
+  addCircleMarkers(lng = man_data$Longitude, lat = man_data$Latitude, 
+                 color = 'yellow', radius = 0.1, group = 'Manhattan') %>%
+  addCircleMarkers(lng = queens_data$Longitude, lat = queens_data$Latitude, 
+                 color = 'red', radius = 0.1, group = 'Queens') %>%
+  addCircleMarkers(lng = st_data$Longitude, lat = st_data$Latitude, 
+                 color = 'black', radius = 0.1, group = 'Staten Island') %>%
+  
+  addLayersControl(overlayGroups = c('Bronx','Brooklyn', 'Manhattan', 'Queens', 'Staten Island'),
+                   options = layersControlOptions(collapsed = FALSE))
+
+map_boro
+
+```
+
+
+Chloropleth map with leaflet package:
+Choice between chloropleths with Boroughs and Precincts 
+
+
+```{r, message = FALSE}
+
+
+
+
+ny_precincts <- readOGR("Data/NYC_Police_Precincts/NYC_Police_Precincts.shp")
+shootings_pc <- datafile %>% group_by(PRECINCT) %>% summarise(n()) %>%mutate(
+  num_shootings = `n()`) %>% mutate(shooting_rate = num_shootings/sum(num_shootings))
+
+shootings_pc <- rbind(shootings_pc, c(22, NA, NA, NA)) 
+
+shootings_pre <- shootings_pc %>% arrange(PRECINCT)
+
+is.element(ny_precincts$Precinct, shootings_pre$PRECINCT)
+
+palette <- colorBin("RdYlBu", domain = shootings_pre$num_shootings)
+
+label_chlor <- paste("<p>", paste('Precinct no.', shootings_pre$PRECINCT),"<p>",
+                     "<p>", paste('Num. of shootings', shootings_pre$num_shootings) ,"<p>",
+                     sep = '')
+
+ny_shootings_chlor <- leaflet() %>% addProviderTiles(providers$Stamen)%>%
+  setView(lng= -74.0060 , lat = 40.7128, zoom = 10)%>%
+  addPolygons(data = ny_precincts, color = "Black", weight = 1, smoothFactor = 0.5, 
+              highlight = highlightOptions(weight = 3, color = 'grey',
+                                           fillOpacity = 0.3,
+                                           bringToFront = TRUE),
+              fillColor = palette(shootings_pre$num_shootings),
+              label = lapply(label_chlor, HTML))%>%
+  addLegend(pal = palette, values = shootings_pre$num_shootings, position = "topright")
+
+ny_shootings_chlor
+
+
+```
+
+
+
+
