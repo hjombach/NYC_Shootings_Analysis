@@ -5,6 +5,8 @@ date: "3/14/2021"
 output: pdf_document
 ---
 
+### Data is for 2006 to  2019
+
 ```{r - setup, include=FALSE, message = FALSE, warning = FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
@@ -24,7 +26,7 @@ shooting_df <- read_csv("Working_Data_Files/NYPD_Shooting_Data.csv")
 
 names(shooting_df) <- tolower(names(shooting_df))
 
-shooting_df <- shooting_df %>% 
+shooting_df <- shooting_df %>%
   dplyr::rename(murder = statistical_murder_flag,
          date= occur_date)
 
@@ -33,14 +35,14 @@ shooting_df$date <- mdy(shooting_df$date)
 tt <- strptime(shooting_df$occur_time, "%H:%M")
 shooting_df$hour <- format(round(tt, units="hours"), format="%H:%M")
 
-shooting_df = shooting_df %>% 
-  mutate(date = ymd(date)) %>% 
+shooting_df = shooting_df %>%
+  mutate(date = ymd(date)) %>%
   mutate_at(vars(date), funs(year, month, day))
 
 shooting_df$month <- as.factor(shooting_df$month)
 
 # For negative binomial regression involving only the Bronx
-bronx_shootings <- shooting_df %>% 
+bronx_shootings <- shooting_df %>%
   dplyr::filter(boro == 'BRONX')
 
 
@@ -49,45 +51,49 @@ daily_shooting_counts <- ddply(bronx_shootings,.(date),nrow)
 
 
 # subset the data frame
-x <- shooting_df %>% 
+x <- shooting_df %>%
   subset(select = c('date', 'occur_time', 'boro', 'precinct', 'location_desc',
-                    'murder', 'perp_age_group', 'perp_sex', 'vic_age_group', 
+                    'murder', 'perp_age_group', 'perp_sex', 'vic_age_group',
                     'vic_sex', 'vic_race'))
 
+# write.csv(shooting_df, "Working_Data_Files/shooting_df.csv")
 ```
 
-```{r - Weather Data - Set Up, message = FALSE}
+```{r - Weather Data Export to CSV Dataframe, message = FALSE}
 
-weather_df <- list.files(path='Working_Data_Files/Weather', full.names = TRUE) %>% 
-  lapply(read_csv) %>% 
+weather_df <- list.files(path='Working_Data_Files/Weather/files', full.names = TRUE) %>%
+  lapply(read_csv) %>%
   bind_rows
 
 names(weather_df) <- tolower(names(weather_df))
 
-weather_df <- weather_df %>% 
+weather_df <- weather_df %>%
   dplyr::rename(max_temp = tmax, min_temp = tmin)
 
 # format date column
 weather_df$date <- mdy(weather_df$date)
 
-# vector to be used for x-axis labels
-months <- c("Jan", 'Feb', "Mar", 'Apr', 'May', 'June', 'July',
-            'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+write.csv(weather_df, "Working_Data_Files/Weather/all_weather.csv",
+          row.names = FALSE)
 
 ```
 
-```{r - Pollution Data - Set Up, message = FALSE}
+```{r - Pollution Data - Export to CSV Dataframes, message = FALSE}
 
 # Columns in each pollutant frame to keep
 keeps <- c("Date.Local", "Arithmetic.Mean")
 
 
-### Carbon Monoxide
+## Run the pollutant code blocks to create initial csv data files. Subsequent
+## runs of the data can use the block of code embedded in the 3 lines of hashtag
+## marks
 
-co_files <- list.files(path='Working_Data_Files/Full_Pollution/CO', 
+### Carbon Monoxide ############################################################
+
+co_files <- list.files(path='Working_Data_Files/Full_Pollution/CO',
                        pattern = '*csv', full.names = TRUE)
 
-ldf <- lapply(co_files, read.csv) 
+ldf <- lapply(co_files, read.csv)
 ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
 
 co_df <- do.call('rbind', ldf)
@@ -96,12 +102,16 @@ co_df <- co_df[keeps]
 
 co_df <- dplyr::rename(co_df, co_ppm = Arithmetic.Mean)
 
-### Nitrogen Dioxide
+write.csv(co_df, "Working_Data_Files/Full_Pollution/co_df.csv",
+          row.names = FALSE)
 
-no2_files <- list.files(path='Working_Data_Files/Full_Pollution/NO2', 
+
+### Nitrogen Dioxide ###########################################################
+
+no2_files <- list.files(path='Working_Data_Files/Full_Pollution/NO2',
                         pattern = '*csv', full.names = TRUE)
 
-ldf <- lapply(no2_files, read.csv) 
+ldf <- lapply(no2_files, read.csv)
 ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
 
 no2_df <- do.call('rbind', ldf)
@@ -109,12 +119,15 @@ no2_df <- no2_df[keeps]
 
 no2_df <- dplyr::rename(no2_df, no2_ppm = Arithmetic.Mean)
 
-### Ozone
+write.csv(no2_df, "Working_Data_Files/Full_Pollution/no2_df.csv",
+          row.names = FALSE)
 
-ozone_files <- list.files(path='Working_Data_Files/Full_Pollution/ozone', 
+### Ozone ############################################################
+
+ozone_files <- list.files(path='Working_Data_Files/Full_Pollution/ozone',
                           pattern = '*csv', full.names = TRUE)
 
-ldf <- lapply(ozone_files, read.csv) 
+ldf <- lapply(ozone_files, read.csv)
 ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
 
 ozone_df <- do.call('rbind', ldf)
@@ -122,12 +135,16 @@ ozone_df <- ozone_df[keeps]
 
 ozone_df <- dplyr::rename(ozone_df, ozone_ppm = Arithmetic.Mean)
 
-### Sulfur Dioxide
+write.csv(ozone_df, "Working_Data_Files/Full_Pollution/ozone_df.csv",
+          row.names = FALSE)
 
-so2_files <- list.files(path='Working_Data_Files/Full_Pollution/SO2', 
+
+### Sulfur Dioxide ############################################################
+
+so2_files <- list.files(path='Working_Data_Files/Full_Pollution/SO2',
                         pattern = '*csv', full.names = TRUE)
 
-ldf <- lapply(so2_files, read.csv) 
+ldf <- lapply(so2_files, read.csv)
 ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
 
 so2_df <- do.call('rbind', ldf)
@@ -135,58 +152,172 @@ so2_df <- so2_df[keeps]
 
 so2_df <- dplyr::rename(so2_df, so2_ppb = Arithmetic.Mean)
 
+write.csv(so2_df, "Working_Data_Files/Full_Pollution/so2_df.csv",
+          row.names = FALSE)
+
+
+### PM2.5 ############################################################
+
+pm2.5_files <- list.files(path='Working_Data_Files/Full_Pollution/PM2.5',
+                        pattern = '*csv', full.names = TRUE)
+
+ldf <- lapply(pm2.5_files, read.csv)
+ldf <- lapply(ldf,  function(x) x[x[,grep("AQS_PARAMETER_DESC",names(x))]=='PM2.5 - Local Conditions',])
+pm2.5_df <- do.call('rbind', ldf)
+
+pm2.5_df <- dplyr::rename(pm2.5_df, pm2.5_conc = Daily.Mean.PM2.5.Concentration)
+pm2.5_df <- pm2.5_df[pm2.5_df$Site.Name == "IS 52", ]
+pm2.5_df <- pm2.5_df %>%
+  subset(select = c(Date, pm2.5_conc)) %>%
+  dplyr::rename(Date.Local = Date)
+
+pm2.5_df <- pm2.5_df %>%
+  mutate(Date.Local = mdy(Date.Local))
+
+
+write.csv(pm2.5_df, "Working_Data_Files/Full_Pollution/pm2.5.csv",
+          row.names = FALSE)
+
+################################################################################
+################################################################################
+################################################################################
+
+##### If dataframes have already been created and saved previously
+#
+# co_df <- read.csv("Working_Data_Files/Full_Pollution/Pollutant_Dataframes/co_df.csv")
+# no2_df <- read.csv("Working_Data_Files/Full_Pollution/Pollutant_Dataframes/no2_df.csv")
+# so2_df <- read.csv("Working_Data_Files/Full_Pollution/Pollutant_Dataframes/so2_df.csv")
+# ozone_df <- read.csv("Working_Data_Files/Full_Pollution/Pollutant_Dataframes/ozone_df.csv")
+# pm2.5_df <- read.csv("Working_Data_Files/Full_Pollution/Pollutant_Dataframes/pm2.5.csv")
+#
+################################################################################
+################################################################################
+################################################################################
+
 # Combine all dataframes into single dataframe
-pollution_df <- co_df %>% 
-  dplyr::left_join(no2_df, by = 'Date.Local') %>% 
-  dplyr::left_join(ozone_df, by = 'Date.Local') %>% 
-  dplyr::left_join(so2_df, by = 'Date.Local') 
+pollution_df <- co_df %>%
+  dplyr::left_join(no2_df, by = 'Date.Local') %>%
+  dplyr::left_join(ozone_df, by = 'Date.Local') %>%
+  dplyr::left_join(so2_df, by = 'Date.Local') %>%
+  dplyr::left_join(pm2.5_df, by = 'Date.Local')
 
 # Remove so2 concentration values that are negative
-pollution_df <- pollution_df %>% 
+pollution_df <- pollution_df %>%
   dplyr::filter(so2_ppb >= 0.0)
 
 # Average values with multiple measurements in a single day
-pollution_df <- pollution_df %>% 
-  group_by(Date.Local) %>% 
-  mutate_each(funs(mean)) %>% 
+pollution_df <- pollution_df %>%
+  group_by(Date.Local) %>%
+  mutate_each(funs(mean)) %>%
   distinct
 
 # Rename and format columns
 pollution_df <- dplyr::rename(pollution_df, date = Date.Local)
-pollution_df <- pollution_df %>% 
+pollution_df <- pollution_df %>%
   mutate(date = ymd(date))
 
 # Log transform sulfur dioxide
-pollution_df<- pollution_df %>% 
+pollution_df<- pollution_df %>%
   mutate(so2_ppb_log = log1p(so2_ppb))
+
+write.csv(pollution_df, "Working_Data_Files/Full_Pollution/Pollutant_Dataframes/pollution_df.csv", row.names = FALSE)
+
 ```
 
-```{r - Combine All Data}
+```{r - Barometric Pressure Export to CSV, message = FALSE}
+## Run the this code block to create initial csv data file. Subsequent
+## runs can comment out this block and run the
+## "Create Daily Shooting dataframe and Environmental Dataframe" block
 
-# join weather and pollution data
+
+pressure_keeps <- c("Date.Local", "Arithmetic.Mean")
+
+pressure_files <- list.files(path='Working_Data_Files/Baro_Pressure/Yearly',
+                        pattern = '*csv', full.names = TRUE)
+
+ldf <- lapply(pressure_files, read.csv)
+ldf <- lapply(ldf,  function(x) x[x[,grep("County.Name",names(x))]=='Bronx',])
+
+pressure_df <- do.call('rbind', ldf)
+pressure_df <- pressure_df[pressure_keeps]
+
+pressure_df <-  pressure_df %>%
+  dplyr::rename(date = Date.Local,
+                baro_pressure = Arithmetic.Mean) %>%
+  mutate(date = ymd(date))
+
+write.csv(pressure_df, 'Working_Data_Files/Baro_Pressure/pressure_df.csv')
+
+```
+
+```{r - Combine All Data Export to CSV daily_shootings_df}
+## Run the this code block to create initial csv data file. Subsequent
+## runs can comment out this block and run the
+## "Create Daily Shooting dataframe and Environmental Dataframe" block
+
+
+pollution_df <- read.csv("Working_Data_Files/Full_Pollution/pollution_df.csv")
+weather_df <- read.csv("Working_Data_Files/Weather/all_weather.csv")
+pressure_df <- read.csv("Working_Data_Files/Baro_Pressure/pressure_df.csv")
+
+## join weather and pollution data
 all_environmental <- full_join(weather_df, pollution_df, by = 'date')
 
 # format date column
-all_environmental = all_environmental %>% 
-  mutate(date = ymd(date)) %>% 
+all_environmental <-  all_environmental %>%
+  mutate(date = ymd(date)) %>%
   mutate_at(vars(date), funs(year, month, day))
+
+pollution_df <- pollution_df %>%
+  mutate(date = ymd(date))
+
+pressure_df <- pressure_df %>%
+  mutate(date = ymd(date))
+
+all_environmental <- full_join(all_environmental, pressure_df, by = 'date')
 
 all_environmental$month <- as.factor(all_environmental$month)
 
-# create dataframe with one row per day with shooting # column 
-daily_shootings_df <- full_join(all_environmental, daily_shooting_counts, 
+write.csv(all_environmental, "Working_Data_Files/all_environmental.csv")
+
+## create dataframe with one row per day with shooting # column
+daily_shootings_df <- full_join(all_environmental, daily_shooting_counts,
                                 by = 'date')
 
 daily_shootings_df <- tidyr::replace_na(daily_shootings_df, list(V1=0))
 
 # format and subset dataframe
-daily_shootings_df <- daily_shootings_df %>%  
-  dplyr::rename(shootings = V1) %>% 
-  subset(select = -c(year, month, day, station, name, snwd, min_temp, snow)) %>% 
+daily_shootings_df <- daily_shootings_df %>%
+  dplyr::rename(shootings = V1) %>%
+  subset(select = -c(year, month, day, station, name, snwd, min_temp, snow)) %>%
   na.omit(daily_shootings_df)
+
+
+# write.csv(daily_shootings_df, "Working_Data_Files/daily_shootings_df.csv")
+
+
 ```
 
+```{r  Create Daily Shooting dataframe and Environmental Dataframe}
+
+### Run if the csv files have already been created in the code blocks above
+
+# daily_shootings_df <- read.csv("Working_Data_Files/daily_shootings_df.csv")
+# all_environmental <- read.csv("Working_Data_Files/all_environmental.csv")
+# all_environmental$month <- as.factor(all_environmental$month)
+# 
+# daily_shootings_df <- daily_shootings_df %>% 
+#   dplyr::filter(pm2.5_conc >= 0.0)
+
+```
+
+
 ```{r - Environmental Visualization Investigation}
+
+# vector to be used for x-axis labels
+months <- c("Jan", 'Feb', "Mar", 'Apr', 'May', 'June', 'July',
+            'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
 
 daily_shootings_df %>% 
   ggplot(aes(x = shootings)) +
@@ -244,57 +375,100 @@ all_environmental %>%
        y = 'Temperature (ºF)', x = '')  +
   theme(axis.text=element_text(size=12))
 
+
+all_environmental %>% 
+  ggplot(aes(x=month, y=baro_pressure)) +
+  geom_bar(stat = "summary", fun = "mean", fill = 'purple') + 
+  scale_x_discrete(labels=months) +
+  labs(title = 'Average Levels of Barometric Pressure per Month',
+       y = 'Millibars', x = '')  +
+  coord_cartesian(ylim=c(990,1020)) +
+  theme(axis.text=element_text(size=12))
+
+# tiff("pm25_month.tiff", units="in", width=8, height=5, res=300)
+all_environmental %>% 
+  ggplot(aes(x=month, y=pm2.5_conc)) +
+  geom_bar(stat = "summary", fun = "mean", fill = 'chartreuse3') + 
+  scale_x_discrete(labels=months) +
+  labs(title = 'Average Levels of PM2.5 per Month',
+       y = 'ug/m^3', x = '')+
+  theme(axis.text=element_text(size=12))
+# dev.off()
+
+
 all_environmental %>% 
   ggplot(aes(x=co_ppm)) +
   geom_histogram(bins = 100, fill = 'dark blue') +
-  labs(title = 'Distribution of Carbon Monoxide Levels')  +
+  labs(title = 'Distribution of Carbon Monoxide Levels',
+       x='Carbon Monoxide')  +
   theme(axis.text=element_text(size=12))
+
 
 all_environmental %>% 
   ggplot(aes(x=no2_ppm)) +
   geom_histogram(bins = 100, fill = 'dark green')+
-  labs(title = 'Distribution of Nitrogen Dioxide Levels')  +
+  labs(title = 'Distribution of Nitrogen Dioxide Levels',
+       x='Nitrogen Dioxide')  +
   theme(axis.text=element_text(size=12))
+
 
 all_environmental %>% 
   ggplot(aes(x=ozone_ppm)) +
   geom_histogram(bins = 100, fill = 'coral3')+
-  labs(title = 'Distribution of Ozone Levels')  +
+  labs(title = 'Distribution of Ozone Levels',
+       x = 'Ozone')  +
   theme(axis.text=element_text(size=12))
 
 all_environmental %>% 
   ggplot(aes(x=so2_ppb)) +
   geom_histogram(bins = 100, fill = 'cadetblue')+
-  labs(title = 'Distribution of Sulfur Dioxide Levels')  +
+  labs(title = 'Distribution of Sulfur Dioxide Levels',
+       x = 'Sulfur Dioxide')  +
   theme(axis.text=element_text(size=12))
   
   all_environmental %>% 
   ggplot(aes(x=so2_ppb_log)) +
   geom_histogram(bins = 100, fill = 'cadetblue')+
-  labs(title = 'Distribution of Log Transformed Sulfur Dioxide Levels')  +
+  labs(title = 'Distribution of Log Transformed Sulfur Dioxide Levels',
+       x = 'Log Sulfur Dioxide')  +
   theme(axis.text=element_text(size=12))
   
 
 all_environmental %>% 
   ggplot(aes(x=max_temp)) +
   geom_histogram(bins = 50, fill = 'burlywood4')+
-  labs(title = 'Distribution of Temperature Readings')  +
+  labs(title = 'Distribution of Temperature Readings',
+       x = 'Temperature')  +
   theme(axis.text=element_text(size=12))
 
 all_environmental %>% 
   ggplot(aes(x=prcp)) +
   geom_histogram(fill = 'gray23', bins=50)+
-  labs(title = 'Distribution of Precipitation per Day (Inches)')  +
+  labs(title = 'Distribution of Precipitation per Day (Inches)',
+       x = 'Precipitation')  +
+  theme(axis.text=element_text(size=12))
+
+all_environmental %>% 
+  ggplot(aes(x=baro_pressure)) +
+  geom_histogram(fill = 'purple', bins=75)+
+  labs(title = 'Distribution of Barometric Pressure Levels (Millibars)',
+       x = 'Barometric Pressure')  +
   theme(axis.text=element_text(size=12))
 
 
-cor_matrix_df <- subset(daily_shootings_df, select = c(max_temp,
-                                               co_ppm, no2_ppm, ozone_ppm, 
-                                               so2_ppb_log, prcp)) 
+all_environmental %>% 
+  ggplot(aes(x=pm2.5_conc)) +
+  geom_histogram(fill = 'chartreuse3', binwidth=.21)+
+  labs(title = 'Distribution of PM2.5 Levels (ug/cubic meter)',
+       x = 'Particulate Matter < 2.5 microns')  +
+  theme(axis.text=element_text(size=12))
 
-
-ggpairs(cor_matrix_df, ggplot2::aes(alpha=.01, fill='red'))
-
+# cor_matrix_df <- subset(daily_shootings_df, select = c(max_temp,
+#                                                co_ppm, no2_ppm, ozone_ppm, 
+#                                                so2_ppb_log, prcp, baro_pressure)) 
+# 
+# 
+# ggpairs(cor_matrix_df, ggplot2::aes(alpha=.01, fill='red'))
 
 ```
 
@@ -302,8 +476,8 @@ ggpairs(cor_matrix_df, ggplot2::aes(alpha=.01, fill='red'))
 
 # Poisson Model
 
-p1 <- glm(shootings ~ co_ppm + no2_ppm + ozone_ppm + so2_ppb_log + max_temp + 
-            prcp,  family="poisson", data=daily_shootings_df)
+p1 <- glm(shootings ~ co_ppm + no2_ppm + ozone_ppm + so2_ppb_log + max_temp +
+             baro_pressure,  family="poisson", data=daily_shootings_df)
 
 summary(p1)
 
@@ -314,18 +488,17 @@ dispersiontest(p1,trafo=1) # Significant over-dispersion observed
 
 # Negative Binomial Model
 
-nb1 <- glm.nb(shootings ~ co_ppm + no2_ppm + ozone_ppm + so2_ppb_log + max_temp + 
-            prcp, data =daily_shootings_df)
+nb1 <- glm.nb(shootings ~ co_ppm + no2_ppm + ozone_ppm + so2_ppb_log + pm2.5_conc + max_temp + 
+            baro_pressure, data =daily_shootings_df)
 
-daily_shootings_df %>% 
-  select(co_ppm, no2_ppm, ozone_ppm, so2_ppb_log, max_temp, prcp) %>% 
-  tbl_summary()
+# daily_shootings_df %>% 
+#   select(co_ppm, no2_ppm, ozone_ppm, so2_ppb_log, pm2.5_conc, max_temp, prcp, baro_pressure) %>% 
+#   tbl_summary()
 
 summary(nb1)
 
 tbl_regression(nb1, exponentiate = FALSE)
 tbl_regression(nb1, exponentiate = TRUE)
-
 ```
 
 ```{r - Shootings - Location Investigation}
